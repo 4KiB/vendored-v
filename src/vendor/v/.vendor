@@ -1,0 +1,15 @@
+https://github.com/vlang/v.git@81418b7fe
+
+-bench
+-.cirrus.yml
+-example
+-examples
+-.github
+-slow_tests
+-test
+-testdata
+-tests
+-*_test.v
+-tutorials
+
++patch/
