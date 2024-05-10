@@ -8,6 +8,9 @@ clean:
 rebuild-v:
 	@v self
 
+static: example
+	@v -freestanding src/example/example.v
+
 vendor:
 	@src/vendor/bin/build
 
