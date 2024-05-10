@@ -1,0 +1,87 @@
+#!/bin/sh
+
+set -e
+vendor=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+THIS="$vendor"/bin/$(basename -- "$0")
+
+main() {
+  built_tinycc || build_tinycc
+  built_libgc  || build_libgc
+  built_v      || build_v
+}
+
+build_tinycc() {
+  echo "--- tinycc ---"
+  cd "$vendor"/v/thirdparty; rm -fr tcc
+  cd "$vendor"/tinycc
+
+  ./configure                             \
+    --prefix="$vendor"/v/thirdparty/tcc   \
+    --extra-cflags="-O3 -march=native"    \
+    --config-bcheck=yes                   \
+    --config-backtrace=yes
+
+  make -j
+  make install
+
+  cd "$vendor"/v/thirdparty/tcc; ln -s bin/tcc tcc.exe
+}
+
+build_libgc() {
+  echo "--- libgc ---"
+  cd "$vendor"/libgc
+
+  [ -e configure ] || ./autogen.sh
+  env                                     \
+    CFLAGS="-Os -march=native -fPIC"      \
+    LDFLAGS="-Os -fPIC"                   \
+    ./configure                           \
+      --disable-dependency-tracking       \
+      --disable-docs                      \
+      --enable-handle-fork=yes            \
+      --enable-rwlock                     \
+      --enable-threads=pthreads           \
+      --enable-static                     \
+      --enable-shared=no                  \
+      --enable-parallel-mark              \
+      --enable-single-obj-compilation     \
+      --enable-gc-debug                   \
+      --with-libatomic-ops=yes            \
+      --enable-sigrt-signals
+
+  make -j
+  cp -v .libs/libgc.a "$vendor"/v/thirdparty/tcc/lib/
+}
+
+build_v() {
+  echo "--- v ---"
+  cd "$vendor"/v
+
+  make local=true
+  ./v self
+  ./v build-tools
+
+  cd "$vendor"/bin
+  ln -sf ../v/v .
+  touch "$vendor"/.v.built
+}
+
+built_tinycc() {
+  newer "$vendor"/v/thirdparty/tcc/bin/tcc "$THIS" "$vendor"/tinycc/.vendor
+}
+
+built_libgc() {
+  newer "$vendor"/v/thirdparty/tcc/lib/libgc.a "$THIS" "$vendor"/libgc/.vendor
+}
+
+built_v() {
+  [ -x "$vendor"/bin/v ] &&
+    newer "$vendor"/.v.built "$THIS" "$vendor"/v/.vendor
+}
+
+newer() {
+  [ -e $1 ] && [ $1 -nt $2 ] && [ $1 -nt $3 ]
+}
+
+main "$@"
