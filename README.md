@@ -31,7 +31,7 @@ suggested in V's [doc][dist] on packaging `v` for OS distributions.
 A `.vendor` file in the root of each `src/vendor/` repository contains audit
 detail on the download of upstream files. This file is simple enough to update
 manually and is simple enough for a small program to manage.\* The format is
-the git remote URL at a given reference, followed by one or more lines
+the git remote URL at a given reference, followed by zero or more lines
 modifying the resulting clone.
 
 ```
