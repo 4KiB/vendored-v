@@ -58,15 +58,18 @@ find . -name 'PATTERN' | xargs rm -r
 Lines beginning with `+` reference a directory relative to the project root:
 
 ```
-fix.patch
-build.sh
-path/to/override.txt
-another/path/0001.patch
-another/path/0002.patch
+patch/
+  fix.patch
+  build.sh
+  path/to/override.txt
+  another/path/0001.patch
+  another/path/0002.patch
 ```
 
-The directory layout mirrors that of the repository. Files ending in `.patch`
-apply within the listed directory, otherwise copy over as-is.
+The `.vendor` line can have an optional trailing slash, i.e. `+patch` or
+`+patch/` for readability that the reference is to a directory. The directory
+layout mirrors that of the repository. Files ending in `.patch` apply within
+the listed directory, otherwise copy over as-is.
 
 Further, it's important to discard .git to (a) keep the resulting repository
 from getting too large and (b) avoid confusing `git` by nesting projects. The
