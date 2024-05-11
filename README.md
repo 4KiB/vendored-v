@@ -69,7 +69,8 @@ patch/
 The `.vendor` line can have an optional trailing slash, i.e. `+patch` or
 `+patch/` for readability that the reference is to a directory. The directory
 layout mirrors that of the repository. Files ending in `.patch` apply within
-the listed directory, otherwise copy over as-is.
+the listed directory, otherwise copy over as-is. If the reference is to a file
+and not a directory, then it is a relative path to copy into the project root.
 
 Further, it's important to discard .git to (a) keep the resulting repository
 from getting too large and (b) avoid confusing `git` by nesting projects. The
