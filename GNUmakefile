@@ -1,24 +1,27 @@
-all: example
+all: build
 
-example: src/example/example
+build: src/example/example
 
 clean:
-	@cd src/example; git clean -fdx
+	cd src/example; git clean -fdx
 
 rebuild-v:
-	@v self
+	v self
 
-static: example
-	@v -freestanding src/example/example.v
+static: clean build
+static: VFLAGS := -freestanding
 
 vendor:
-	@src/vendor/bin/build
+	src/vendor/bin/build
+
+src/example/example: src/vendor/v/v
+	cd src/example; v $(VFLAGS) .
+	ls -lh $@
 
 src/vendor/v/v: vendor
-	@true
-
-%: %.v src/vendor/v/v | vendor
-	v $<
+	true
 
 export PATH := $(PWD)/src/vendor/bin:$(PATH)
 export MAKEFLAGS += --no-print-director
+
+.SILENT:
