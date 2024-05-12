@@ -56,7 +56,9 @@ Otherwise, it accepts simple `*` wildcards and is the equivalent of
 find . -name 'PATTERN' | xargs rm -r
 ```
 
-Lines beginning with `+` reference a directory relative to the project root:
+When lines that begin with `+` contain a slash (`/`), they reference a relative
+path to copy into the project root. Otherwise, they reference a file or a
+directory of files:
 
 ```
 patch/
@@ -67,11 +69,11 @@ patch/
   another/path/0002.patch
 ```
 
-The `.vendor` line can have an optional trailing slash, i.e. `+patch` or
-`+patch/` for readability that the reference is to a directory. The directory
-layout mirrors that of the repository. Files ending in `.patch` apply within
-the listed directory, otherwise copy over as-is. If the reference is to a file
-and not a directory, then it is a relative path to copy into the project root.
+When referencing directories, the line can have an optional trailing slash for
+readability, i.e. `+patch` or `+patch/`. The directory layout mirrors that of
+the repository. Files ending in `.patch` apply within the listed directory,
+otherwise copy over as-is. If the reference is to a file and not a directory,
+then it is a relative path to copy into the project root.
 
 Further, it's important to discard .git to (a) keep the resulting repository
 from getting too large and (b) avoid confusing `git` by nesting projects. The
