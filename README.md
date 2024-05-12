@@ -47,9 +47,10 @@ https://github.com/{user}/{repo}.git@0c0ffee
 \* As a result of vendoring, a tool to manage vendor files can be written in V.
 
 Use `#` for comments. The ref is anything understood by `git checkout`. Lines
-beginning with `-` are to remove all files and directories that match the given
-name, accepting simple `*` wildcards, the equivalent of `find|xargs` where
-PATTERN is the line in `.vendor` without the leading `-`:
+beginning with `-` are to remove files and directories that match the given
+name. If the line contains a slash (`/`), then it is a relative path.
+Otherwise, it accepts simple `*` wildcards and is the equivalent of
+`find|xargs` where PATTERN is the line in `.vendor` without the leading `-`:
 
 ```
 find . -name 'PATTERN' | xargs rm -r
