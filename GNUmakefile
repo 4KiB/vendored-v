@@ -22,6 +22,6 @@ src/vendor/v/v: vendor
 	true
 
 export PATH := $(PWD)/src/vendor/bin:$(PATH)
-export MAKEFLAGS += --no-print-director
+export MAKEFLAGS += --no-print-directory
 
 .SILENT:
