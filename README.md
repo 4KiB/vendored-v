@@ -82,7 +82,7 @@ Note that repositories have multiple `.gitignore` at various locations, and
 that git can track files that are otherwise ignored; such files need to be
 vendored.
 
-The result of vendoring V is a repository that is 60MB, a factor of at least
+The result of vendoring V is a repository that is 60MB, a factor of more than
 three less than upstream, having removed git history and project support
 files. This compresses down to a 9.7MB git archive, which is how much data is
 required on a `git clone`.
