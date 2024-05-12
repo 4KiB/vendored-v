@@ -92,6 +92,13 @@ required on a `git clone`.
 
 In this repository, V application code is at `src/example/`; `v` builds in
 place, resulting in `example.v` having its executable at `src/example/example`.
+Given that the executable is built in place, the `src/example/.gitignore` file
+contains the following, requiring `git add -f src/example/NEWFILE.v`:
+
+```
+*
+!*.v
+```
 
 The executable generated from .v code has dependencies typical to dynamically
 linked C, namely libc. Call `make static` to use V's `-freestanding` feature to
