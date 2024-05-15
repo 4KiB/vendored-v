@@ -25,3 +25,4 @@ export PATH := $(PWD)/src/vendor/bin:$(PATH)
 export MAKEFLAGS += --no-print-directory
 
 .SILENT:
+.PHONY: src/example/example
