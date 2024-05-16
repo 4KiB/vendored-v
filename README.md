@@ -1,3 +1,5 @@
+Include V's source code with a project written in V.
+
 On a new `git clone`, go from `cc` to `v *.v`. Call `make` to build `tcc`,
 `libgc`, and `v` without any downloads or prebuilt binaries.
 
