@@ -14,12 +14,9 @@ static: VFLAGS := -freestanding
 vendor:
 	src/vendor/bin/build
 
-src/example/example: src/vendor/v/v
+src/example/example: vendor
 	cd src/example; v $(VFLAGS) .
 	ls -lh $@
-
-src/vendor/v/v: vendor
-	true
 
 export PATH := $(PWD)/src/vendor/bin:$(PATH)
 export MAKEFLAGS += --no-print-directory
