@@ -60,7 +60,6 @@ build_v() {
 
   make local=true
   ./v self
-  ./v build-tools
 
   cd "$vendor"/bin
   ln -sf ../v/v .
