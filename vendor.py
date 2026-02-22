@@ -292,6 +292,21 @@ def _apply_add_rules(
             _apply_add_file(source_dir, rel, dry_run=dry_run)
 
 
+def _checkout_with_shallow_fallback(clone_dir: Path, ref: str) -> None:
+    try:
+        _run(["git", "checkout", ref], cwd=clone_dir)
+    except subprocess.CalledProcessError:
+        try:
+            _run(
+                ["git", "fetch", "--depth", "1", "origin", ref],
+                cwd=clone_dir,
+            )
+            _run(["git", "checkout", "FETCH_HEAD"], cwd=clone_dir)
+        except subprocess.CalledProcessError:
+            _run(["git", "fetch", "--unshallow", "origin"], cwd=clone_dir)
+            _run(["git", "checkout", ref], cwd=clone_dir)
+
+
 def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
     """Run vendoring for one source directory.
 
@@ -338,7 +353,7 @@ def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
         overlays.mkdir(parents=True, exist_ok=True)
 
         _run(["git", "clone", "--depth", "1", spec.remote, str(clone_dir)])
-        _run(["git", "checkout", spec.ref], cwd=clone_dir)
+        _checkout_with_shallow_fallback(clone_dir, spec.ref)
 
         preserved = _backup_overlay_sources(
             spec.source, spec.add_rules, overlays, dry_run=dry_run
