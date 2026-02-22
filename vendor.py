@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""Vendor repositories from .vendor manifests.
+
+This module is intentionally standalone from outer project build wiring.
+"""
 
 from __future__ import annotations
 
@@ -41,6 +45,17 @@ def _run(
 
 
 def _sanitize_relative_path(raw: str, *, context: str) -> Path:
+    """Validate a repo-local relative path from a .vendor directive.
+
+    >>> _sanitize_relative_path("patch/", context="+patch")
+    PosixPath('patch')
+    >>> _sanitize_relative_path("nested/file.txt", context="+nested/file.txt")
+    PosixPath('nested/file.txt')
+    >>> _sanitize_relative_path("../escape", context="+../escape")
+    Traceback (most recent call last):
+    ...
+    SystemExit: 1
+    """
     path = Path(raw.rstrip("/"))
     if str(path) in {"", "."}:
         _fatal(f"invalid empty path in {context}")
@@ -50,6 +65,19 @@ def _sanitize_relative_path(raw: str, *, context: str) -> Path:
 
 
 def parse_vendor_file(vendor_file: Path) -> VendorSpec:
+    """Parse a .vendor file into a structured spec.
+
+    >>> from tempfile import TemporaryDirectory
+    >>> from pathlib import Path
+    >>> with TemporaryDirectory() as td:
+    ...     base = Path(td) / "v"
+    ...     base.mkdir()
+    ...     vf = base / ".vendor"
+    ...     _ = vf.write_text("https://example.invalid/repo.git@abc123\\n-test\\n+patch/\\n")
+    ...     spec = parse_vendor_file(vf)
+    ...     (spec.remote, spec.ref, spec.remove_rules, spec.add_rules, spec.source.name)
+    ('https://example.invalid/repo.git', 'abc123', ['test'], ['patch/'], 'v')
+    """
     header: str | None = None
     remove_rules: list[str] = []
     add_rules: list[str] = []
@@ -269,6 +297,26 @@ def _apply_add_rules(
 
 
 def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
+    """Run vendoring for one source directory.
+
+    In dry-run mode, this function must not perform any filesystem mutations
+    or network operations.
+
+    >>> spec = VendorSpec(
+    ...     source=Path('/tmp/not-used'),
+    ...     remote='https://example.invalid/repo.git',
+    ...     ref='deadbeef',
+    ...     remove_rules=['test'],
+    ...     add_rules=['patch/'],
+    ... )
+    >>> process_vendor(spec, dry_run=True)  # doctest: +ELLIPSIS
+    === /tmp/not-used ===
+    $ git clone https://example.invalid/repo.git <temp>/clone
+    $ git checkout deadbeef (cwd=<temp>/clone)
+    - remove-rule test
+    + add-rule patch/
+    ~ dry-run: skipped clone/checkout and all filesystem mutations
+    """
     print(f"=== {spec.source} ===")
     if dry_run:
         _run(["git", "clone", spec.remote, "<temp>/clone"], dry_run=True)
@@ -309,6 +357,18 @@ def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
 
 
 def _find_vendor_sources(vendor_root: Path) -> list[Path]:
+    """Find every vendor directory that contains a .vendor file.
+
+    >>> from tempfile import TemporaryDirectory
+    >>> with TemporaryDirectory() as td:
+    ...     root = Path(td)
+    ...     (root / 'a').mkdir()
+    ...     (root / 'b').mkdir()
+    ...     _ = (root / 'a' / '.vendor').write_text('u@r\\n')
+    ...     _ = (root / 'b' / '.vendor').write_text('u@r\\n')
+    ...     [p.name for p in _find_vendor_sources(root)]
+    ['a', 'b']
+    """
     if not vendor_root.is_dir():
         _fatal(f"vendor root not found: {vendor_root}")
     found: list[Path] = []
@@ -318,6 +378,16 @@ def _find_vendor_sources(vendor_root: Path) -> list[Path]:
 
 
 def _resolve_targets(vendor_root: Path, targets: list[str]) -> list[Path]:
+    """Resolve user targets relative to the vendor root.
+
+    >>> from tempfile import TemporaryDirectory
+    >>> with TemporaryDirectory() as td:
+    ...     root = Path(td)
+    ...     (root / 'v').mkdir()
+    ...     _ = (root / 'v' / '.vendor').write_text('u@r\\n')
+    ...     [p.name for p in _resolve_targets(root, ['v'])]
+    ['v']
+    """
     if not targets:
         return _find_vendor_sources(vendor_root)
 
