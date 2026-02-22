@@ -16,10 +16,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parent
-DEFAULT_VENDOR_ROOT = REPO_ROOT / "src" / "vendor"
-
-
 @dataclass
 class VendorSpec:
     source: Path
@@ -368,13 +364,41 @@ def _find_vendor_sources(vendor_root: Path) -> list[Path]:
     ...     _ = (root / 'b' / '.vendor').write_text('u@r\\n')
     ...     [p.name for p in _find_vendor_sources(root)]
     ['a', 'b']
+    >>> with TemporaryDirectory() as td:
+    ...     root = Path(td)
+    ...     _ = (root / '.vendor').write_text('u@r\\n')
+    ...     [p.name for p in _find_vendor_sources(root / '.vendor')]  # doctest: +ELLIPSIS
+    ['tmp...']
     """
+    if vendor_root.is_file():
+        if vendor_root.name != ".vendor":
+            _fatal(
+                f"vendor root must be a directory or .vendor file: {vendor_root}"
+            )
+        return [vendor_root.parent]
+
     if not vendor_root.is_dir():
         _fatal(f"vendor root not found: {vendor_root}")
-    found: list[Path] = []
+
+    found: set[Path] = set()
+    root_vendor = vendor_root / ".vendor"
+    if root_vendor.is_file():
+        found.add(vendor_root)
     for vendor_file in vendor_root.rglob(".vendor"):
-        found.append(vendor_file.parent)
+        found.add(vendor_file.parent)
     return sorted(found)
+
+
+def _resolve_vendor_source(candidate: Path) -> Path:
+    if candidate.is_file():
+        if candidate.name != ".vendor":
+            _fatal(f"expected .vendor file or directory target: {candidate}")
+        return candidate.parent
+
+    vendor_file = candidate / ".vendor"
+    if not vendor_file.is_file():
+        _fatal(f"missing .vendor file: {vendor_file}")
+    return candidate
 
 
 def _resolve_targets(vendor_root: Path, targets: list[str]) -> list[Path]:
@@ -387,20 +411,24 @@ def _resolve_targets(vendor_root: Path, targets: list[str]) -> list[Path]:
     ...     _ = (root / 'v' / '.vendor').write_text('u@r\\n')
     ...     [p.name for p in _resolve_targets(root, ['v'])]
     ['v']
+    >>> with TemporaryDirectory() as td:
+    ...     root = Path(td)
+    ...     (root / 'v').mkdir()
+    ...     _ = (root / 'v' / '.vendor').write_text('u@r\\n')
+    ...     [p.name for p in _resolve_targets(root, ['v/.vendor'])]
+    ['v']
     """
     if not targets:
         return _find_vendor_sources(vendor_root)
 
+    base_dir = vendor_root if vendor_root.is_dir() else vendor_root.parent
     resolved: list[Path] = []
     for target in targets:
         candidate = Path(target)
         if not candidate.is_absolute():
-            candidate = vendor_root / candidate
+            candidate = base_dir / candidate
         candidate = candidate.resolve()
-        vendor_file = candidate / ".vendor"
-        if not vendor_file.is_file():
-            _fatal(f"missing .vendor file: {vendor_file}")
-        resolved.append(candidate)
+        resolved.append(_resolve_vendor_source(candidate))
     return sorted(resolved)
 
 
@@ -411,13 +439,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "targets",
         nargs="*",
-        help="Target vendor directories (default: all directories under src/vendor containing .vendor)",
+        help="Target vendor directories or .vendor files (default: discover all .vendor files under --root)",
     )
     parser.add_argument(
         "--root",
         type=Path,
-        default=DEFAULT_VENDOR_ROOT,
-        help=f"Vendor root directory (default: {DEFAULT_VENDOR_ROOT})",
+        default=None,
+        help="Root directory or .vendor file used for discovery (default: current working directory)",
     )
     parser.add_argument(
         "--dry-run",
@@ -429,7 +457,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    vendor_root = args.root.resolve()
+    vendor_root = (args.root or Path.cwd()).resolve()
     targets = _resolve_targets(vendor_root, args.targets)
     if not targets:
         _fatal(f"no .vendor files found under {vendor_root}")
