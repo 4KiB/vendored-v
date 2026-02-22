@@ -23,6 +23,7 @@ class VendorSpec:
     ref: str
     remove_rules: list[str]
     add_rules: list[str]
+    ignore_rules: list[str]
 
 
 def _fatal(message: str) -> None:
@@ -60,6 +61,29 @@ def _sanitize_relative_path(raw: str, *, context: str) -> Path:
     return path
 
 
+def _parse_ignore_rule(rule: str) -> Path:
+    if any(ch in rule for ch in "*?[]"):
+        _fatal(f"ignore rule does not support globbing: !{rule}")
+    return _sanitize_relative_path(rule, context=f"!{rule}")
+
+
+def _path_matches_ignored(rel: Path, ignored_paths: set[Path]) -> bool:
+    return any(
+        ignored == rel or ignored in rel.parents for ignored in ignored_paths
+    )
+
+
+def _path_intersects_ignored(rel: Path, ignored_paths: set[Path]) -> bool:
+    return any(
+        ignored == rel or ignored in rel.parents or rel in ignored.parents
+        for ignored in ignored_paths
+    )
+
+
+def _resolve_ignored_paths(ignore_rules: list[str]) -> set[Path]:
+    return {_parse_ignore_rule(rule) for rule in ignore_rules}
+
+
 def parse_vendor_file(vendor_file: Path) -> VendorSpec:
     """Parse a .vendor file into a structured spec.
 
@@ -69,14 +93,15 @@ def parse_vendor_file(vendor_file: Path) -> VendorSpec:
     ...     base = Path(td) / "v"
     ...     base.mkdir()
     ...     vf = base / ".vendor"
-    ...     _ = vf.write_text("https://example.invalid/repo.git@abc123\\n-test\\n+patch/\\n")
+    ...     _ = vf.write_text("https://example.invalid/repo.git@abc123\\n-test\\n+patch/\\n!keep/\\n")
     ...     spec = parse_vendor_file(vf)
-    ...     (spec.remote, spec.ref, spec.remove_rules, spec.add_rules, spec.source.name)
-    ('https://example.invalid/repo.git', 'abc123', ['test'], ['patch/'], 'v')
+    ...     (spec.remote, spec.ref, spec.remove_rules, spec.add_rules, spec.ignore_rules, spec.source.name)
+    ('https://example.invalid/repo.git', 'abc123', ['test'], ['patch/'], ['keep/'], 'v')
     """
     header: str | None = None
     remove_rules: list[str] = []
     add_rules: list[str] = []
+    ignore_rules: list[str] = []
 
     for line_no, raw_line in enumerate(
         vendor_file.read_text().splitlines(), start=1
@@ -103,6 +128,14 @@ def parse_vendor_file(vendor_file: Path) -> VendorSpec:
             add_rules.append(rule)
             continue
 
+        if line.startswith("!"):
+            rule = line[1:].strip()
+            if not rule:
+                _fatal(f"empty ignore rule in {vendor_file}:{line_no}")
+            _parse_ignore_rule(rule)
+            ignore_rules.append(rule)
+            continue
+
         _fatal(f"invalid directive in {vendor_file}:{line_no}: {line}")
 
     if header is None:
@@ -120,10 +153,23 @@ def parse_vendor_file(vendor_file: Path) -> VendorSpec:
         ref=ref,
         remove_rules=remove_rules,
         add_rules=add_rules,
+        ignore_rules=ignore_rules,
     )
 
 
-def _remove_path(path: Path, dry_run: bool = False) -> None:
+def _remove_path(
+    path: Path,
+    dry_run: bool = False,
+    *,
+    source_dir: Path | None = None,
+    ignored_paths: set[Path] | None = None,
+) -> None:
+    if source_dir is not None and ignored_paths:
+        rel = path.relative_to(source_dir)
+        if _path_intersects_ignored(rel, ignored_paths):
+            print(f"~ skip ignored path {path}")
+            return
+
     if not path.exists() and not path.is_symlink():
         return
     print(f"- remove {path}")
@@ -149,16 +195,33 @@ def _apply_patch_file(
     _run(["git", "apply", str(patch_file)], cwd=work_dir, dry_run=dry_run)
 
 
-def _copy_tree(src: Path, dst: Path, dry_run: bool = False) -> None:
+def _copy_tree(
+    src: Path,
+    dst: Path,
+    dry_run: bool = False,
+    *,
+    root_dst: Path,
+    ignored_paths: set[Path],
+) -> None:
     for child in src.iterdir():
         if child.name == ".git":
             continue
         target = dst / child.name
+        rel = target.relative_to(root_dst)
+        if _path_matches_ignored(rel, ignored_paths):
+            print(f"~ skip ignored path {target}")
+            continue
+
         if child.is_dir() and not child.is_symlink():
-            if dry_run:
-                print(f"+ copytree {child} -> {target}")
-                continue
-            shutil.copytree(child, target, dirs_exist_ok=True)
+            if not dry_run:
+                target.mkdir(parents=True, exist_ok=True)
+            _copy_tree(
+                child,
+                target,
+                dry_run=dry_run,
+                root_dst=root_dst,
+                ignored_paths=ignored_paths,
+            )
         else:
             _copy_file(child, target, dry_run=dry_run)
 
@@ -214,22 +277,47 @@ def _restore_overlay_sources(
 
 
 def _replace_vendor_tree(
-    source_dir: Path, clone_dir: Path, keep: set[str], dry_run: bool = False
+    source_dir: Path,
+    clone_dir: Path,
+    keep: set[str],
+    dry_run: bool = False,
+    *,
+    ignored_paths: set[Path],
 ) -> None:
     for child in source_dir.iterdir():
         if child.name in keep:
             continue
-        _remove_path(child, dry_run=dry_run)
-    _copy_tree(clone_dir, source_dir, dry_run=dry_run)
+        _remove_path(
+            child,
+            dry_run=dry_run,
+            source_dir=source_dir,
+            ignored_paths=ignored_paths,
+        )
+    _copy_tree(
+        clone_dir,
+        source_dir,
+        dry_run=dry_run,
+        root_dst=source_dir,
+        ignored_paths=ignored_paths,
+    )
 
 
 def _apply_remove_rules(
-    source_dir: Path, remove_rules: list[str], dry_run: bool = False
+    source_dir: Path,
+    remove_rules: list[str],
+    dry_run: bool = False,
+    *,
+    ignored_paths: set[Path],
 ) -> None:
     for rule in remove_rules:
         if "/" in rule:
             rel = _sanitize_relative_path(rule, context=f"-{rule}")
-            _remove_path(source_dir / rel, dry_run=dry_run)
+            _remove_path(
+                source_dir / rel,
+                dry_run=dry_run,
+                source_dir=source_dir,
+                ignored_paths=ignored_paths,
+            )
             continue
 
         matches = [
@@ -240,11 +328,20 @@ def _apply_remove_rules(
         for match in sorted(
             matches, key=lambda item: len(item.parts), reverse=True
         ):
-            _remove_path(match, dry_run=dry_run)
+            _remove_path(
+                match,
+                dry_run=dry_run,
+                source_dir=source_dir,
+                ignored_paths=ignored_paths,
+            )
 
 
 def _apply_add_file(
-    source_dir: Path, rule_path: Path, dry_run: bool = False
+    source_dir: Path,
+    rule_path: Path,
+    dry_run: bool = False,
+    *,
+    ignored_paths: set[Path],
 ) -> None:
     src = source_dir / rule_path
     if not src.exists() and not src.is_symlink():
@@ -252,6 +349,9 @@ def _apply_add_file(
 
     if src.suffix == ".patch":
         patch_cwd = source_dir / rule_path.parent
+        if _path_matches_ignored(rule_path.parent, ignored_paths):
+            print(f"~ skip ignored path {patch_cwd}")
+            return
         _apply_patch_file(src, patch_cwd, dry_run=dry_run)
         return
 
@@ -259,11 +359,18 @@ def _apply_add_file(
         dst_rel = rule_path
     else:
         dst_rel = rule_path
+    if _path_matches_ignored(dst_rel, ignored_paths):
+        print(f"~ skip ignored path {source_dir / dst_rel}")
+        return
     _copy_file(src, source_dir / dst_rel, dry_run=dry_run)
 
 
 def _apply_add_dir(
-    source_dir: Path, rule_path: Path, dry_run: bool = False
+    source_dir: Path,
+    rule_path: Path,
+    dry_run: bool = False,
+    *,
+    ignored_paths: set[Path],
 ) -> None:
     src_dir = source_dir / rule_path
     if not src_dir.is_dir():
@@ -275,21 +382,41 @@ def _apply_add_dir(
         rel = path.relative_to(src_dir)
         if path.suffix == ".patch":
             patch_cwd = source_dir / rel.parent
+            if _path_matches_ignored(rel.parent, ignored_paths):
+                print(f"~ skip ignored path {patch_cwd}")
+                continue
             _apply_patch_file(path, patch_cwd, dry_run=dry_run)
+            continue
+        if _path_matches_ignored(rel, ignored_paths):
+            print(f"~ skip ignored path {source_dir / rel}")
             continue
         _copy_file(path, source_dir / rel, dry_run=dry_run)
 
 
 def _apply_add_rules(
-    source_dir: Path, add_rules: list[str], dry_run: bool = False
+    source_dir: Path,
+    add_rules: list[str],
+    dry_run: bool = False,
+    *,
+    ignored_paths: set[Path],
 ) -> None:
     for rule in add_rules:
         rel = _sanitize_relative_path(rule, context=f"+{rule}")
         path = source_dir / rel
         if path.is_dir():
-            _apply_add_dir(source_dir, rel, dry_run=dry_run)
+            _apply_add_dir(
+                source_dir,
+                rel,
+                dry_run=dry_run,
+                ignored_paths=ignored_paths,
+            )
         else:
-            _apply_add_file(source_dir, rel, dry_run=dry_run)
+            _apply_add_file(
+                source_dir,
+                rel,
+                dry_run=dry_run,
+                ignored_paths=ignored_paths,
+            )
 
 
 def _checkout_with_shallow_fallback(clone_dir: Path, ref: str) -> None:
@@ -319,6 +446,7 @@ def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
     ...     ref='deadbeef',
     ...     remove_rules=['test'],
     ...     add_rules=['patch/'],
+    ...     ignore_rules=['vc/'],
     ... )
     >>> process_vendor(spec, dry_run=True)  # doctest: +ELLIPSIS
     === /tmp/not-used ===
@@ -326,6 +454,7 @@ def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
     $ git checkout deadbeef (cwd=<temp>/clone)
     - remove-rule test
     + add-rule patch/
+    ! ignore-rule vc/
     ~ dry-run: skipped clone/checkout and all filesystem mutations
     """
     print(f"=== {spec.source} ===")
@@ -343,6 +472,8 @@ def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
             print(f"- remove-rule {rule}")
         for rule in spec.add_rules:
             print(f"+ add-rule {rule}")
+        for rule in spec.ignore_rules:
+            print(f"! ignore-rule {rule}")
         print("~ dry-run: skipped clone/checkout and all filesystem mutations")
         return
 
@@ -355,18 +486,34 @@ def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
         _run(["git", "clone", "--depth", "1", spec.remote, str(clone_dir)])
         _checkout_with_shallow_fallback(clone_dir, spec.ref)
 
+        ignored_paths = _resolve_ignored_paths(spec.ignore_rules)
+
         preserved = _backup_overlay_sources(
             spec.source, spec.add_rules, overlays, dry_run=dry_run
         )
         _replace_vendor_tree(
-            spec.source, clone_dir, keep={".vendor"}, dry_run=dry_run
+            spec.source,
+            clone_dir,
+            keep={".vendor"},
+            dry_run=dry_run,
+            ignored_paths=ignored_paths,
         )
         _restore_overlay_sources(
             spec.source, preserved, overlays, dry_run=dry_run
         )
 
-        _apply_remove_rules(spec.source, spec.remove_rules, dry_run=dry_run)
-        _apply_add_rules(spec.source, spec.add_rules, dry_run=dry_run)
+        _apply_remove_rules(
+            spec.source,
+            spec.remove_rules,
+            dry_run=dry_run,
+            ignored_paths=ignored_paths,
+        )
+        _apply_add_rules(
+            spec.source,
+            spec.add_rules,
+            dry_run=dry_run,
+            ignored_paths=ignored_paths,
+        )
         _remove_path(spec.source / ".git", dry_run=dry_run)
 
 

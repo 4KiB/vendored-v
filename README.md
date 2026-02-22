@@ -58,6 +58,16 @@ Otherwise, it accepts simple `*` wildcards and is the equivalent of
 find . -name 'PATTERN' | xargs rm -r
 ```
 
+Lines beginning with `!` are ignore rules. They mark paths as ignored during
+vendoring. Ignore rules are always exact relative paths and do not support
+globbing. For example, `!vc/` ignores `vc/` and everything under it.
+
+Ignored paths are excluded from:
+
+- replacement of the source tree from the cloned upstream repository,
+- removal via `-` rules,
+- writes from `+` overlays.
+
 When lines that begin with `+` contain a slash (`/`), they reference a relative
 path to copy into the project root. Otherwise, they reference a file or a
 directory of files:
