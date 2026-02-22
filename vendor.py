@@ -213,6 +213,58 @@ def _restore_overlay_sources(
             shutil.copy2(src, dst)
 
 
+def _find_nested_vendor_sources(source_dir: Path) -> list[Path]:
+    root_vendor = source_dir / ".vendor"
+    candidates = sorted(
+        {
+            vendor_file.parent
+            for vendor_file in source_dir.rglob(".vendor")
+            if vendor_file != root_vendor
+        },
+        key=lambda item: len(item.parts),
+    )
+    nested_roots: list[Path] = []
+    for candidate in candidates:
+        if any(parent in candidate.parents for parent in nested_roots):
+            continue
+        nested_roots.append(candidate)
+    return nested_roots
+
+
+def _backup_nested_vendor_sources(
+    source_dir: Path, backup_dir: Path, dry_run: bool = False
+) -> list[Path]:
+    preserved: list[Path] = []
+    for nested_root in _find_nested_vendor_sources(source_dir):
+        rel = nested_root.relative_to(source_dir)
+        preserved.append(rel)
+        print(f"~ preserve nested vendor source {nested_root}")
+        if dry_run:
+            continue
+        dst = backup_dir / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(nested_root, dst, dirs_exist_ok=True)
+    return preserved
+
+
+def _restore_nested_vendor_sources(
+    source_dir: Path,
+    preserved: list[Path],
+    backup_dir: Path,
+    dry_run: bool = False,
+) -> None:
+    for rel in preserved:
+        src = backup_dir / rel
+        dst = source_dir / rel
+        if not src.is_dir():
+            continue
+        print(f"~ restore nested vendor source {dst}")
+        if dry_run:
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+
+
 def _replace_vendor_tree(
     source_dir: Path, clone_dir: Path, keep: set[str], dry_run: bool = False
 ) -> None:
@@ -350,11 +402,16 @@ def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
         tmp = Path(tmp_str)
         clone_dir = tmp / "clone"
         overlays = tmp / "overlay"
+        nested_vendors = tmp / "nested-vendors"
         overlays.mkdir(parents=True, exist_ok=True)
+        nested_vendors.mkdir(parents=True, exist_ok=True)
 
         _run(["git", "clone", "--depth", "1", spec.remote, str(clone_dir)])
         _checkout_with_shallow_fallback(clone_dir, spec.ref)
 
+        preserved_nested = _backup_nested_vendor_sources(
+            spec.source, nested_vendors, dry_run=dry_run
+        )
         preserved = _backup_overlay_sources(
             spec.source, spec.add_rules, overlays, dry_run=dry_run
         )
@@ -368,6 +425,9 @@ def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
         _apply_remove_rules(spec.source, spec.remove_rules, dry_run=dry_run)
         _apply_add_rules(spec.source, spec.add_rules, dry_run=dry_run)
         _remove_path(spec.source / ".git", dry_run=dry_run)
+        _restore_nested_vendor_sources(
+            spec.source, preserved_nested, nested_vendors, dry_run=dry_run
+        )
 
 
 def _find_vendor_sources(vendor_root: Path) -> list[Path]:
