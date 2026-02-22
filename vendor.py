@@ -270,14 +270,28 @@ def _apply_add_rules(
 
 def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
     print(f"=== {spec.source} ===")
+    if dry_run:
+        _run(["git", "clone", spec.remote, "<temp>/clone"], dry_run=True)
+        _run(
+            ["git", "checkout", spec.ref],
+            cwd=Path("<temp>/clone"),
+            dry_run=True,
+        )
+        for rule in spec.remove_rules:
+            print(f"- remove-rule {rule}")
+        for rule in spec.add_rules:
+            print(f"+ add-rule {rule}")
+        print("~ dry-run: skipped clone/checkout and all filesystem mutations")
+        return
+
     with tempfile.TemporaryDirectory(prefix="vendor-") as tmp_str:
         tmp = Path(tmp_str)
         clone_dir = tmp / "clone"
         overlays = tmp / "overlay"
         overlays.mkdir(parents=True, exist_ok=True)
 
-        _run(["git", "clone", spec.remote, str(clone_dir)], dry_run=False)
-        _run(["git", "checkout", spec.ref], cwd=clone_dir, dry_run=False)
+        _run(["git", "clone", spec.remote, str(clone_dir)])
+        _run(["git", "checkout", spec.ref], cwd=clone_dir)
 
         preserved = _backup_overlay_sources(
             spec.source, spec.add_rules, overlays, dry_run=dry_run
