@@ -307,7 +307,7 @@ def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
     ... )
     >>> process_vendor(spec, dry_run=True)  # doctest: +ELLIPSIS
     === /tmp/not-used ===
-    $ git clone https://example.invalid/repo.git <temp>/clone
+    $ git clone --depth 1 https://example.invalid/repo.git <temp>/clone
     $ git checkout deadbeef (cwd=<temp>/clone)
     - remove-rule test
     + add-rule patch/
@@ -315,7 +315,10 @@ def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
     """
     print(f"=== {spec.source} ===")
     if dry_run:
-        _run(["git", "clone", spec.remote, "<temp>/clone"], dry_run=True)
+        _run(
+            ["git", "clone", "--depth", "1", spec.remote, "<temp>/clone"],
+            dry_run=True,
+        )
         _run(
             ["git", "checkout", spec.ref],
             cwd=Path("<temp>/clone"),
@@ -334,7 +337,7 @@ def process_vendor(spec: VendorSpec, dry_run: bool = False) -> None:
         overlays = tmp / "overlay"
         overlays.mkdir(parents=True, exist_ok=True)
 
-        _run(["git", "clone", spec.remote, str(clone_dir)])
+        _run(["git", "clone", "--depth", "1", spec.remote, str(clone_dir)])
         _run(["git", "checkout", spec.ref], cwd=clone_dir)
 
         preserved = _backup_overlay_sources(
